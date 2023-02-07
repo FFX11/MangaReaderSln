@@ -2,7 +2,7 @@
 
 Simple overview of use/purpose.
 
-![](https://github.com/MangaReader.Server/MangaIntro.gif)
+<code><img alt="gif" src="https://github.com/FFX11/MangaReaderSln/blob/master/MangaReader.Server/MangaIntro.gif" /></p>
 
 ## Description
 
