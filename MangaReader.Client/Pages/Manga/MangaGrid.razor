@@ -1,0 +1,267 @@
+﻿@page "/mangaGrid"
+
+@inject IDistributedCache cache
+@inject NavigationManager NavManager
+@inject IMangaService _ManService
+@inject NavigationManager NavManager
+@inject IUserService Service
+@inject AuthenticationStateProvider AuthenticationStateProvider
+@inject HttpClient Http
+@inject IJSRuntime JS
+
+<div class="input-group">
+    <div>
+        <InputSelect @bind-Value="ratingContent">
+            @foreach (var rating in contentRatings)
+            {
+                <option value="@rating">@rating</option>
+            }
+        </InputSelect>
+        <button class=" btn-primary my-1" type="button" @onclick="GetMangaByContent">Confirm</button>
+    </div>
+</div>
+
+@if (_mangaGrid is null && loadLocation == string.Empty)
+{
+        <div class="spinner"></div>
+
+    if (title == null)
+    {
+        <div class="spinner"></div>
+    }
+    else
+    {
+        <p class="text-white">@title</p>
+    }
+}
+else
+{
+        <div class="h3 @isCacheData">@loadLocation</div>
+    if (_mangaGrid != null)
+    {
+        <EditForm Model="_mangaGrid">
+            <div class="input-group">
+                <div class="form-outline">
+                    <input placeholder="Manga Search..." type="search" id="form1" class="form-control" @bind-value="@title" />
+                    <label class="form-label" for="form1"></label>
+                </div>
+                <button type="submit" style="height:fit-content" class="btn btn-primary mx-1" @onclick="SearchByTitle">Search</button>
+            </div>
+        </EditForm>
+    }
+
+    if (_mangaGrid != null)
+    {
+        <div class="container-fluid card-group">
+            @foreach (var manga in _mangaGrid.Data)
+            {
+                <div class="card-header">
+                    <div class="card">
+                        <img class="card" src="data:image/png;base64,@manga.FullImgPath"
+                 style="width:300px; height:400px;">
+                        <div class="card-footer">
+                            <button style="font-size:20px; color:red" class="card-link cut-text" @onclick="(()=> GoToManga(manga.Id, manga.Attributes.Title.En))">@manga.Attributes.Title.En</button>
+                            <h5 class="card-title text-warning">Content Rating: @manga.Attributes.ContentRating</h5>
+                            <button class="btn-outline-info" type="button" @onclick="(()=>SaveMangaToUser(manga.Id))">Save</button>
+                        </div>
+                    </div>
+                </div>
+            }
+        </div>
+    }
+}
+
+
+@code
+{
+    [Parameter]
+    public string? mangaId { get; set; }
+    [Parameter]
+    public string? mangaTitle { get; set; }
+    MangaGridModel _mangaGrid = new();
+    MyUserModel _user = new();
+    MangaClass _mangaClass = new();
+    string ratingContent = "safe";
+    string errorString = string.Empty;
+    string title = string.Empty;
+    private string loadLocation = string.Empty;
+    private string isCacheData = string.Empty;
+    string mySavedImg = string.Empty;
+
+    List<string> contentRatings =
+    new List<string>
+        {
+        "safe", "suggestive","erotica"
+        };
+
+    protected override async Task OnInitializedAsync()
+    {
+        _mangaGrid = null;
+        loadLocation = string.Empty;
+
+
+        //We using caching with Redis here
+        string recordKey = "MangaGrid_" + DateTime.Now.ToString("yyyyMMdd_hhmm");
+
+        _mangaGrid = await cache.GetRecordAsync<MangaGridModel>(recordKey);
+
+        if (_mangaGrid is null)
+        {
+            //we call the service to get a list of manga by contentRating File
+            _mangaGrid = await _ManService.GetMangaList(ratingContent);
+
+
+            foreach (var manga in _mangaGrid.Data)
+            {
+                //Get the Cover
+                string mangaName = manga.Id;
+                string fileName = manga.Relationships.Where(x => x.Attributes.FileName != "").FirstOrDefault().Attributes.FileName;
+
+                mySavedImg = $"https://uploads.mangadex.org/covers/{mangaName}/{fileName}";
+
+
+                var redisFile = ImageHelper.ConvertImageURLToBase64(mySavedImg);
+
+                manga.FullImgPath = redisFile;
+
+                mangaTitle = manga.Attributes.Title.En;
+            }
+
+            loadLocation = $"Loaded from API at {DateTime.Now}";
+            isCacheData = "text-danger";
+            //Save the Redis Key here
+            await cache.SetRecordAsync(recordKey, _mangaGrid);
+        }
+        else
+        {
+            loadLocation = $"Loaded from cache at {DateTime.Now}";
+            isCacheData = "text-danger";
+        }
+    }
+
+
+    private async void SaveMangaToUser(string id)
+    {
+
+        var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+
+        var user = authState.User;
+
+        var myClaims = user.Claims.ToList();
+
+
+
+        if (user.Identity.IsAuthenticated)
+        {
+            _user.Id = int.Parse(myClaims[0].Value.ToString());
+
+            var getUrs = await Service.GetCurrUser(_user.Id);
+            getUrs.ConfirmEmail = user.Identity.Name;
+
+            getUrs.Manga = new();
+            _mangaClass = new();
+            _mangaClass.MangaName = id;
+            _mangaClass.UserId = _user.Id;
+            getUrs.Manga.Add(_mangaClass);
+            var myUser = await Service.SaveManga(getUrs);
+
+        }
+        else
+        {
+            NavManager.NavigateTo("Login", true);
+        }
+    }
+
+    private async void GetMangaByContent()
+    {
+        _mangaGrid = null;
+        loadLocation = string.Empty;
+
+        string recordKey = $"MangaByContent{ratingContent}_" + DateTime.Now.ToString("yyyyMMdd_hhmm");
+
+        _mangaGrid = await cache.GetRecordAsync<MangaGridModel>(recordKey);
+
+        if (_mangaGrid is null)
+        {
+            _mangaGrid = await _ManService.GetMangaList(ratingContent);
+
+            foreach (var manga in _mangaGrid.Data)
+            {
+                //Get the Cover
+                string mangaName = manga.Id;
+                string fileName = manga.Relationships.Where(x => x.Attributes.FileName != "").FirstOrDefault().Attributes.FileName;
+
+                mySavedImg = $"https://uploads.mangadex.org/covers/{mangaName}/{fileName}";
+
+
+                var redisFile = ImageHelper.ConvertImageURLToBase64(mySavedImg);
+
+                manga.FullImgPath = redisFile;
+
+                mangaTitle = manga.Attributes.Title.En;
+            }
+
+            loadLocation = $"Loaded from API at {DateTime.Now}";
+            isCacheData = "text-danger";
+            //Save the Redis Key here
+            await cache.SetRecordAsync(recordKey, _mangaGrid);
+        }
+        else
+        {
+            loadLocation = $"Loaded from cache at {DateTime.Now}";
+            isCacheData = "text-danger";
+        }
+        StateHasChanged();
+    }
+
+    private async void SearchByTitle()
+    {
+        _mangaGrid = new();
+        //_manga = new();
+        loadLocation = string.Empty;
+
+        string recordKey = "MangaSearch_" + DateTime.Now.ToString("yyyyMMdd_hhmm");
+
+        _mangaGrid = await cache.GetRecordAsync<MangaGridModel>(recordKey);
+
+        if (_mangaGrid is null)
+        {
+            _mangaGrid = await _ManService.SearchByTitle(title);
+            //we call the service to get a list of manga by contentRating File
+            foreach (var manga in _mangaGrid.Data)
+            {
+                //Get the Cover
+                string mangaName = manga.Id;
+                string fileName = manga.Relationships.Where(x => x.Attributes.FileName != "").FirstOrDefault().Attributes.FileName;
+
+                mySavedImg = $"https://uploads.mangadex.org/covers/{mangaName}/{fileName}";
+
+
+                var redisFile = ImageHelper.ConvertImageURLToBase64(mySavedImg);
+
+                manga.FullImgPath = redisFile;
+
+                mangaTitle = manga.Attributes.Title.En;
+            }
+
+            loadLocation = $"Loaded from API at {DateTime.Now}";
+            isCacheData = "text-danger";
+            //Save the Redis Key here
+            await cache.SetRecordAsync(recordKey, _mangaGrid);
+        }
+        else
+        {
+            loadLocation = $"Loaded from cache at {DateTime.Now}";
+            isCacheData = "text-danger";
+        }
+        StateHasChanged();
+    }
+
+    private void GoToManga(string id, string name)
+    {
+        mangaId = id;
+        mangaTitle = name;
+        NavManager.NavigateTo($"/title/{mangaId}/{mangaTitle}");
+    }
+
+}

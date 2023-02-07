@@ -1,0 +1,113 @@
+﻿@page "/title"
+@page "/title/{MangaId}/{mangaTitle}"
+@inject IJSRuntime JsRuntime
+@inject IHttpClientFactory _clientFactory
+@inject NavigationManager NavManager
+@inject IMangaService _ManService
+
+@if (_chapter is null)
+{
+        <div class="spinner"></div>
+}
+else
+{
+    @if (_chapter.data is not null && _chapter.total > 0)
+    {
+        <PageTitle>@mangaTitle</PageTitle>
+        <div class="card-header">
+            <h1 class="text-danger fw-bold text-center">@mangaTitle</h1>
+                
+        <div class="card-header text-center">
+                <img class="card-img text-center" style="max-height:900px; max-width:700px;"
+             src="data:image/png;base64,@srcImage" />
+        </div>
+
+            <div class="card-footer text-center">
+            @foreach (var chapter in _chapter.data)
+            {
+                if (chapter.attributes.pages > 0)
+                {
+                     <button class="btn btn-danger mx-1 my-1" style="width:60px" @onclick="(()=> GoToChapter(chapter.id))">@chapter.attributes.chapter</button>
+                }
+            }
+                
+                <button class="btn btn-outline-primary" type="button" @onclick="MoreChapters">More Chapters</button>
+        </div>
+            <div class="btn-group mx-3">
+                <input style="max-width:50px" placeholder="Chapter..." @bind-value="chapNum" />
+                <button class="btn-outline-primary" type="button" @onclick="(()=> GoToChapterNum(chapNum))">Go</button>
+            </div>
+    </div>
+    }
+    else
+    {
+        <div class="spinner"></div>
+    }
+}
+
+
+@code
+{
+    [Parameter]
+    public string MangaId { get; set; } = string.Empty;
+    [Parameter]
+    public string? mangaTitle { get; set; }
+    ChapterModel _chapterModel = new();
+    GetChapters _chapter = new();
+    MangaCover? _cover = new();
+    string srcImage { get; set; } = string.Empty;
+    string errorString = string.Empty;
+    int currChaptersPage = 12;
+    int chapNum = 1;
+    string lastChapte = string.Empty;
+    string mySavedImg = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _chapter = await _ManService.GetChaptersByMangaId(MangaId, currChaptersPage);
+        _cover = await _ManService.GetCover(MangaId);
+
+        if(_chapter.total > 0)
+        {
+            mySavedImg = "";
+
+            string coverImg = _cover.Data.FirstOrDefault().Attributes.FileName;
+
+            mySavedImg = $"https://uploads.mangadex.org/covers/{MangaId}/{coverImg}";
+
+            srcImage = ImageHelper.ConvertImageURLToBase64(mySavedImg);
+        }
+        errorString = null;
+    }
+
+    private void GoToChapter(string chapterId)
+    {
+        NavManager.NavigateTo($"/chapter/{chapterId}");
+    }
+
+    private void GoToChapterNum(int num)
+    {
+        num -= 1;
+        var chapter = _chapter.data[num].id;
+
+        NavManager.NavigateTo($"/chapter/{chapter}");
+    }
+
+    private async void MoreChapters()
+    {
+        currChaptersPage += _chapter.total;
+        _chapter = new();
+
+        _chapter = await _ManService.GetChaptersByMangaId(MangaId, currChaptersPage);
+        _cover = await _ManService.GetCover(MangaId);
+
+        if (_chapter.total > 0)
+        {
+            srcImage = srcImage;
+
+        }
+        errorString = null;
+        StateHasChanged();
+    }
+}
+

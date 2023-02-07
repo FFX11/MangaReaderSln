@@ -1,0 +1,257 @@
+﻿@page "/chapter"
+@page "/chapter/{ChapterId}"
+
+
+@inject IJSRuntime JsRuntime
+@inject IHttpClientFactory _clientFactory
+@inject IMangaService _MangaService
+
+<PageTitle>@pageTitle</PageTitle>
+
+<div class="card-header">
+
+    @if (_chapterModel is null)
+    {
+        <div class="h2">@errorString</div>
+    }
+    else if (_chapterModel is null)
+    {
+        <div class="spinner"></div>
+    }
+    else
+    {
+        if (_chapterModel != null)
+        {
+            <div class="card-header text-center">
+                <img src="data:image/png;base64,@srcImage">
+            </div>
+        }
+        if (_chapter.data != null)
+        {
+            <div class="card-footer bg-dark">
+                <div class=" text-white text-xl-start">Vol: @_chapter.data.attributes.volume</div>
+                <div class=" text-white text-xl-start">Chapter: @chapterCount</div>
+                <div class="container">
+                    <div class="row">
+                        <div class="col text-center">
+                            <button class="btn lg btn-info" disabled="@(!backPage)" @onclick="PageBack">Back</button>
+                            <button class="btn lg btn-info" disabled="@(!nextPage)" @onclick="PageNext">Next</button>
+                        </div>
+                    </div>
+                </div>
+                <button class="btn btn-info float-end" type="button" disabled="@(!nextChap)" @onclick="(()=> NextChapter())">Next Chapter</button>
+                <button class="btn btn-info float-start" type="button" disabled="@(!backChap)" @onclick="(()=> BackChapter())">Back Chapter</button>
+            </div>
+        }
+
+    }
+</div>
+
+
+@code
+{
+    [Parameter]
+    public string ChapterId { get; set; } = string.Empty;
+    string mangaId = string.Empty;
+    string imageURL = string.Empty;
+    string srcImage = string.Empty;
+    string hash = string.Empty;
+    ChapterModel _chapterModel = new();
+    GetChapter _chapter = new();
+    GetChapters _chapters = new();
+    string[] myList = Array.Empty<string>();
+    string errorString;
+    string pageTitle = "Chapters";
+    string mySavedImg = "";
+    int chapterHolder;
+    int currPage = 0;
+    int chapterCount;
+    int totalChapters;
+    string localId = string.Empty;
+    bool backPage = false;
+    bool nextPage = false;
+    bool nextChap = false;
+    bool backChap = false;
+    string volText = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _chapterModel = await _MangaService.GetChapterById(ChapterId);
+
+        hash = _chapterModel.Chapter.Hash;
+        myList = _chapterModel.Chapter.Data;
+
+
+        if (myList.Count() > 0)
+        {
+            imageURL = myList.First();
+        }
+
+        mySavedImg = $"https://uploads.mangadex.org/data/{hash}/{imageURL}";
+
+        srcImage = ImageHelper.ConvertImageURLToBase64(mySavedImg);
+
+        _chapter = await _MangaService.GetChapter(ChapterId);
+        chapterCount = Int32.Parse(_chapter.data.attributes.chapter);
+
+        foreach (var data in _chapter.data.relationships)
+        {
+            if (data.type == "manga")
+            {
+                mangaId = data.id;
+            }
+        }
+
+        if (mangaId != null)
+        {
+            _chapters = await _MangaService.GetChapters(mangaId);
+            totalChapters = _chapters.total;
+            errorString = null;
+        }
+
+        if (chapterCount > 1)
+        {
+            backChap = true;
+        }
+        if (chapterCount <= totalChapters)
+        {
+            nextChap = true;
+        }
+        if (currPage < _chapterModel.Chapter.Data.Length)
+        {
+            nextPage = true;
+        }
+    }
+
+    private async void PageNext()
+    {
+        if (_chapterModel.Chapter != null)
+        {
+            if (currPage >= 0 && _chapterModel.Chapter.Data.Length >= currPage)
+            {
+                backPage = true;
+                if (currPage != _chapterModel.Chapter.Data.Count() - 1)
+                {
+                    currPage++;
+                    imageURL = myList.ElementAt(currPage);
+
+                    mySavedImg = $"https://uploads.mangadex.org/data/{hash}/{imageURL}";
+
+                    srcImage = ImageHelper.ConvertImageURLToBase64(mySavedImg);
+                }
+                if (currPage +1 == _chapterModel.Chapter.Data.Length)
+                {
+                    nextPage = false;
+                }
+                await JsRuntime.InvokeVoidAsync("OnScrollEvent");
+            }
+        }
+    }
+    private async void PageBack()
+    {
+        if (currPage > 0 && _chapterModel.Chapter.Data != null)
+        {
+            nextPage = true;
+            currPage--;
+            imageURL = myList.ElementAt(currPage);
+
+            mySavedImg = $"https://uploads.mangadex.org/data/{hash}/{imageURL}";
+
+            srcImage = ImageHelper.ConvertImageURLToBase64(mySavedImg);
+
+        }
+        if (currPage == 0)
+        {
+            backPage = false;
+        }
+        await JsRuntime.InvokeVoidAsync("OnScrollEvent");
+    }
+
+    protected async Task CallChapter()
+    {
+        _chapterModel = new();
+
+        _chapterModel = await _MangaService.GetChapterById(ChapterId);
+
+        hash = _chapterModel.Chapter.Hash;
+        if (_chapterModel.Chapter.Data.Length > 0)
+        {
+            myList = _chapterModel.Chapter.Data;
+            imageURL = myList.First();
+
+            mySavedImg = $"https://uploads.mangadex.org/data/{hash}/{imageURL}";
+
+            srcImage = ImageHelper.ConvertImageURLToBase64(mySavedImg);
+        }
+
+        errorString = null;
+    }
+
+    private async void NextChapter()
+    {
+        backPage = false;
+        if (chapterCount <= _chapters.data.Count())
+        {
+            if (chapterCount < _chapters.data.Count())
+            {
+                chapterCount += 1;
+            }
+            currPage = 0;
+            foreach (var chap in _chapters.data)
+            {
+                if (chap.id == _chapter.data.id)
+                {
+                    ChapterId = _chapters.data[chapterCount - 1].id;
+                    nextPage = true;
+                    break;
+                }
+            }
+            await CallChapter();
+            if (chapterCount == totalChapters)
+            {
+                nextChap = false;
+            }
+            backChap = true;
+            await JsRuntime.InvokeVoidAsync("OnScrollEvent");
+            StateHasChanged();
+        }
+    }
+
+    private async void BackChapter()
+    {
+        backPage = false;
+        if (chapterCount >= 1)
+        {
+            if (chapterCount > _chapters.data.Count())
+            {
+                chapterCount -= 1;
+            }
+            currPage = 0;
+            foreach (var chap in _chapters.data)
+            {
+                if (chap.id == _chapter.data.id)
+                {
+                    if (chapterCount > 0)
+                    {
+                        chapterCount -= 1;
+                    }
+                    ChapterId = _chapters.data[chapterCount - 1].id;
+                    nextPage = true;
+                    break;
+                }
+            }
+            backChap = true;
+            nextChap = true;
+            await CallChapter();
+            await JsRuntime.InvokeVoidAsync("OnScrollEvent");
+        }
+
+        if (chapterCount == 1)
+        {
+            backChap = false;
+        }
+        StateHasChanged();
+    }
+
+}
+

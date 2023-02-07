@@ -1,0 +1,188 @@
+﻿@page "/userpage"
+
+@inject AuthenticationStateProvider AuthenticationStateProvider
+@inject IJSRuntime JsRuntime
+@inject NavigationManager NavManager
+@inject IMangaService _ManService
+@inject IUserService Service
+@inject IDistributedCache cache
+@inject IHttpContextAccessor HttpService
+@attribute [Authorize]
+<h3 class="text-white">My Saved Manga</h3>
+
+@if (_mangaGrid is null && loadLocation == string.Empty)
+{
+    if (errorString == null)
+    {
+        <div class="spinner"></div>
+    }
+    else
+    {
+        <h1 class="text-white">@errorString</h1>
+    }
+}
+else
+{
+    if (_mangaGrid != null)
+    {
+        <div class="card-group">
+            @foreach (var manga in _mangaGrid.Data)
+            {
+                <div class="card-header">
+                    <div class="card" style="width: 20rem;">
+                        <img class="card-img-top my-2 mx-2" src="data:image/png;base64,@manga.FullImgPath"
+                                style="width:300px; height:400px;">
+                        <div class="card-footer">
+                            <button type="button" style="font-size:20px; color:red" class="card-link cut-text" @onclick="(()=> GoToManga(manga.Id, manga.Attributes.Title.En))">@manga.Attributes.Title.En</button>
+                            <h5 class="card-title text-warning">Content Rating: @manga.Attributes.ContentRating</h5>
+                            <button class="btn-outline-info" type="button" @onclick="(()=>DeleteManga(manga.Id))">Delete</button>
+                        </div>
+                    </div>
+                </div>
+            }
+        </div>
+    }
+}
+
+
+@code
+{
+    [Parameter]
+    public string mangaTitle { get; set; } = string.Empty;
+    private string mangaId { get; set; } = string.Empty;
+    MangaGridModel _mangaGrid = new();
+    MangaCover _cover = new();
+    List<MangaGridModel> myGrid = new();
+
+    private List<string> myIds = new();
+    private List<MyUserModel> users = new();
+    private MyUserModel _user = new();
+    string mySavedImg = string.Empty;
+    string errorString = null;
+    string title = string.Empty;
+    string ratingContent = "safe";
+    private string loadLocation = string.Empty;
+    private string isCacheData = string.Empty;
+    List<string> contentRatings =
+    new List<string>
+            {
+        "safe", "suggestive","erotica"
+            };
+
+    [CascadingParameter]
+    private Task<AuthenticationState> authenticationStateTask { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        _user = new();
+        _mangaGrid = null;
+        var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+
+        var user = authState.User;
+
+        var myClaims = user.Claims.ToList();
+
+
+
+        if (user.Identity.IsAuthenticated)
+        {
+            _user.Id = int.Parse(myClaims[0].Value.ToString());
+
+            _user.Email = user.Identity.Name;
+            _user.ConfirmEmail = user.Identity.Name;
+
+            _user = await Service.GetCurrUser(_user.Id);
+
+            foreach (var m in _user.Manga)
+            {
+                myIds.Add(m.MangaName);
+            }
+        }
+        else
+        {
+            NavManager.NavigateTo("Identity/Account/Login", true);
+        }
+
+        _mangaGrid = null;
+        loadLocation = string.Empty;
+
+
+        //we call the service to get a list of manga by contentRating File
+        if (myIds.Count > 0)
+        {
+            _mangaGrid = await _ManService.GetMangaById(myIds);
+        }
+        else
+        {
+            errorString = "No Added Manga Yet";
+            return;
+        }
+
+        foreach (var manga in _mangaGrid.Data)
+        {
+            //Get the Cover
+            string mangaName = manga.Id;
+            string fileName = manga.Relationships.Where(x => x.Attributes.FileName != "").FirstOrDefault().Attributes.FileName;
+
+            mySavedImg = $"https://uploads.mangadex.org/covers/{mangaName}/{fileName}";
+
+            var redisFile = ImageHelper.ConvertImageURLToBase64(mySavedImg);
+
+            manga.FullImgPath = redisFile;
+
+            mangaTitle = manga.Attributes.Title.En;
+        }
+    }
+    
+    private async Task DeleteManga(string mId)
+    {
+        bool confirmed = await JsRuntime.InvokeAsync<bool>("confirm", "Are you sure?");
+        
+        if (confirmed)
+        {
+            foreach (var mangaId in _user.Manga.Where(x=> x.MangaName == mId))
+            {
+                int myId = mangaId.MangaClassId;
+
+                await Service.DeleteManga(myId);
+            }
+
+            _mangaGrid = new();
+            myGrid = new();
+            myIds = new();
+
+            _user = await Service.GetCurrUser(_user.Id);
+
+            foreach (var m in _user.Manga)
+            {
+                myIds.Add(m.MangaName);
+            }
+
+            _mangaGrid = await _ManService.GetMangaById(myIds);
+
+            foreach (var manga in _mangaGrid.Data)
+            {
+                //Get the Cover
+                string mangaName = manga.Id;
+                string fileName = manga.Relationships.Where(x => x.Attributes.FileName != "").FirstOrDefault().Attributes.FileName;
+
+                mySavedImg = $"https://uploads.mangadex.org/covers/{mangaName}/{fileName}";
+
+                var redisFile = ImageHelper.ConvertImageURLToBase64(mySavedImg);
+
+                manga.FullImgPath = redisFile;
+
+                mangaTitle = manga.Attributes.Title.En;
+            }
+            StateHasChanged();
+        }
+        
+    }
+
+    private void GoToManga(string id, string name)
+    {
+        mangaId = id;
+        mangaTitle = name;
+        NavManager.NavigateTo($"/title/{mangaId}/{mangaTitle}");
+    }
+}
